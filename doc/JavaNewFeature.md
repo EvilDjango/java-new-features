@@ -3340,15 +3340,897 @@ import module spring.boot.autoconfigure;
 
 ### 20. 外部函数与内存 API (Foreign Function & Memory API) (Java 22, 正式)
 
-*(待讨论...)*
+*   **演进**: 经历多个预览版本后，在 Java 22 成为正式特性。
+*   **核心理念**: 为 Java 程序提供与非 Java 代码（如 C/C++）交互的标准化、高效、安全的方式。替代传统的 JNI（Java Native Interface）。
+*   **核心优势**:
+    *   **性能更优**: 避免了 JNI 的大部分开销，调用本地代码的性能接近直接调用。
+    *   **类型安全**: 在编译时就能发现类型不匹配的错误。
+    *   **内存管理**: 提供精确的非堆内存控制，避免内存泄漏。
+    *   **跨平台**: 统一的 API 可在不同平台上使用。
 
-### 21. 向量 API (Vector API) (Java 23, 第七轮孵化)
+#### 主要组件
 
-*(待讨论...)*
+**1. Foreign Function Interface (FFI)**
+*   允许 Java 调用本地库中的函数
+*   无需编写 JNI 代码，直接映射本地函数
 
-### 22. 类文件 API (Class-File API) (Java 22, 预览)
+**2. Memory API**
+*   管理非堆内存（off-heap memory）
+*   提供内存段（MemorySegment）的概念
+*   自动内存管理和安全边界检查
 
-*(待讨论...)*
+#### 核心 API 类型
+
+```java
+// 主要接口和类
+import java.lang.foreign.*;
+
+// 1. MemorySegment - 内存段
+MemorySegment segment = MemorySegment.allocateNative(1024);
+
+// 2. MemoryLayout - 内存布局
+MemoryLayout layout = MemoryLayout.structLayout(
+    ValueLayout.JAVA_INT.withName("x"),
+    ValueLayout.JAVA_INT.withName("y")
+);
+
+// 3. Linker - 链接器
+Linker linker = Linker.nativeLinker();
+
+// 4. FunctionDescriptor - 函数描述符
+FunctionDescriptor descriptor = FunctionDescriptor.of(
+    ValueLayout.JAVA_INT,  // 返回类型
+    ValueLayout.JAVA_INT,  // 参数类型
+    ValueLayout.JAVA_INT
+);
+
+// 5. SymbolLookup - 符号查找
+SymbolLookup lookup = SymbolLookup.loaderLookup();
+```
+
+#### 实际应用场景
+
+**1. 调用 C 标准库函数**
+```java
+// 调用 C 标准库的 strlen 函数
+import java.lang.foreign.*;
+
+public class StringLengthExample {
+    public static void main(String[] args) throws Throwable {
+        // 1. 获取链接器
+        Linker linker = Linker.nativeLinker();
+        
+        // 2. 查找 strlen 函数
+        SymbolLookup stdlib = linker.defaultLookup();
+        MemorySegment strlen = stdlib.find("strlen").orElseThrow();
+        
+        // 3. 描述函数签名：size_t strlen(const char*)
+        FunctionDescriptor descriptor = FunctionDescriptor.of(
+            ValueLayout.JAVA_LONG,      // size_t 返回值
+            ValueLayout.ADDRESS         // const char* 参数
+        );
+        
+        // 4. 创建方法句柄
+        MethodHandle strlenHandle = linker.downcallHandle(strlen, descriptor);
+        
+        // 5. 创建 C 字符串
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment cString = arena.allocateUtf8String("Hello, FFI!");
+            
+            // 6. 调用 C 函数
+            long length = (long) strlenHandle.invoke(cString);
+            System.out.println("字符串长度: " + length); // 输出: 12
+        }
+    }
+}
+```
+
+**2. 结构体操作**
+```java
+// 处理 C 结构体
+public class StructExample {
+    // 定义 C 结构体布局：struct Point { int x; int y; };
+    private static final MemoryLayout POINT_LAYOUT = MemoryLayout.structLayout(
+        ValueLayout.JAVA_INT.withName("x"),
+        ValueLayout.JAVA_INT.withName("y")
+    );
+    
+    public static void main(String[] args) {
+        try (Arena arena = Arena.ofConfined()) {
+            // 分配结构体内存
+            MemorySegment point = arena.allocate(POINT_LAYOUT);
+            
+            // 设置字段值
+            point.set(ValueLayout.JAVA_INT, 0, 10);  // x = 10
+            point.set(ValueLayout.JAVA_INT, 4, 20);  // y = 20
+            
+            // 读取字段值
+            int x = point.get(ValueLayout.JAVA_INT, 0);
+            int y = point.get(ValueLayout.JAVA_INT, 4);
+            
+            System.out.println("Point: (" + x + ", " + y + ")");
+        }
+    }
+}
+```
+
+**3. 数组和指针操作**
+```java
+// 处理数组和指针
+public class ArrayExample {
+    public static void main(String[] args) {
+        try (Arena arena = Arena.ofConfined()) {
+            // 分配 int 数组
+            int[] javaArray = {1, 2, 3, 4, 5};
+            MemorySegment nativeArray = arena.allocateArray(
+                ValueLayout.JAVA_INT, 
+                javaArray.length
+            );
+            
+            // 复制数据到本地内存
+            MemorySegment.copy(javaArray, 0, nativeArray, 
+                ValueLayout.JAVA_INT, 0, javaArray.length);
+            
+            // 读取本地内存数据
+            for (int i = 0; i < javaArray.length; i++) {
+                int value = nativeArray.getAtIndex(ValueLayout.JAVA_INT, i);
+                System.out.println("arr[" + i + "] = " + value);
+            }
+        }
+    }
+}
+```
+
+#### 内存管理
+
+**Arena 模式**
+```java
+// 使用 Arena 进行资源管理
+public class MemoryManagementExample {
+    public static void managedMemory() {
+        // 自动资源管理
+        try (Arena arena = Arena.ofConfined()) {
+            // 在 arena 中分配的所有内存会自动释放
+            MemorySegment buffer1 = arena.allocate(1024);
+            MemorySegment buffer2 = arena.allocate(2048);
+            MemorySegment string = arena.allocateUtf8String("Hello");
+            
+            // 使用内存...
+            
+        } // arena 关闭时，所有分配的内存自动释放
+    }
+    
+    public static void sharedMemory() {
+        // 共享 arena，需要手动管理生命周期
+        Arena shared = Arena.ofShared();
+        
+        try {
+            MemorySegment buffer = shared.allocate(1024);
+            // 使用内存...
+        } finally {
+            shared.close(); // 手动关闭
+        }
+    }
+}
+```
+
+#### 安全性和限制
+
+**1. 内存安全**
+*   内存段有明确的边界，越界访问会抛出异常
+*   Arena 关闭后，相关内存段变为无效
+*   提供了安全的内存访问检查
+
+**2. 访问限制**
+```java
+// 需要特殊的模块声明或 JVM 参数
+// --enable-native-access=ALL-UNNAMED
+// 或在 module-info.java 中：
+module myapp {
+    requires java.base;
+    // 启用本地访问
+}
+```
+
+**3. 平台兼容性**
+*   不同平台上的本地库需要分别处理
+*   Windows(.dll)、Linux(.so)、macOS(.dylib)
+
+#### 与 JNI 对比
+
+| 特性 | JNI | Foreign Function API |
+|------|-----|----------------------|
+| 性能 | 中等（有调用开销） | 高（接近本地调用） |
+| 代码复杂度 | 高（需要 C 代码） | 低（纯 Java） |
+| 类型安全 | 运行时检查 | 编译时检查 |
+| 内存管理 | 手动管理 | 自动管理 |
+| 调试难度 | 困难 | 相对容易 |
+
+#### 实际应用领域
+
+**1. 高性能计算**
+*   调用优化的数学库（如 BLAS、LAPACK）
+*   图像和信号处理库
+
+**2. 系统编程**
+*   操作系统 API 调用
+*   硬件驱动接口
+
+**3. 遗留系统集成**
+*   与现有 C/C++ 代码库集成
+*   数据库原生驱动
+
+**4. 跨语言互操作**
+*   调用其他语言编写的库
+*   嵌入式脚本引擎集成
+
+#### 最佳实践
+
+1. **优先使用 try-with-resources**：确保内存资源正确释放
+2. **使用 Arena 管理内存**：避免内存泄漏
+3. **仔细设计内存布局**：匹配本地数据结构
+4. **处理平台差异**：考虑跨平台兼容性
+5. **充分测试**：本地调用可能引入新的错误类型
+6. **评估安全性**：本地代码可能绕过 Java 安全机制
+
+Foreign Function & Memory API 代表了 Java 平台的重大进步，为高性能本地代码集成提供了现代化的解决方案。
+
+### 21. 向量 API (Vector API) (Java 24, 第九轮孵化)
+
+*   **演进**: 从 Java 16 开始孵化，到 Java 24 已经是第九轮孵化。
+*   **核心理念**: 为 Java 提供底层向量化计算能力，充分利用现代 CPU 的 SIMD（Single Instruction, Multiple Data）指令集。
+*   **核心优势**:
+    *   **高性能**: 单条指令处理多个数据，显著提升数值计算性能。
+    *   **跨平台**: 抽象了不同 CPU 架构的 SIMD 指令差异。
+    *   **类型安全**: 编译期类型检查，避免底层汇编的错误风险。
+    *   **JIT 优化**: JVM 可以进一步优化向量操作。
+
+#### SIMD 基础概念
+
+**传统标量运算 vs 向量运算**
+```java
+// 标量运算 - 逐个处理
+int[] a = {1, 2, 3, 4};
+int[] b = {5, 6, 7, 8};
+int[] result = new int[4];
+for (int i = 0; i < 4; i++) {
+    result[i] = a[i] + b[i]; // 4 次独立的加法操作
+}
+
+// 向量运算 - 并行处理
+// 一条指令同时计算 4 个加法：[1,2,3,4] + [5,6,7,8] = [6,8,10,12]
+```
+
+#### 核心 API 概述
+
+```java
+// 主要包和类
+import jdk.incubator.vector.*;
+
+// 1. VectorSpecies - 向量物种（定义向量的类型和长度）
+VectorSpecies<Integer> SPECIES = IntVector.SPECIES_256; // 256位向量，可容纳8个int
+
+// 2. Vector - 向量实例
+IntVector vector1 = IntVector.fromArray(SPECIES, array1, 0);
+IntVector vector2 = IntVector.fromArray(SPECIES, array2, 0);
+
+// 3. VectorMask - 向量掩码（用于条件操作）
+VectorMask<Integer> mask = vector1.compare(VectorOperators.GT, threshold);
+
+// 4. 向量操作
+IntVector result = vector1.add(vector2);
+```
+
+#### 实际代码示例
+
+**1. 基础向量加法**
+```java
+import jdk.incubator.vector.*;
+
+public class VectorAdditionExample {
+    // 选择合适的向量物种
+    private static final VectorSpecies<Integer> SPECIES = IntVector.SPECIES_PREFERRED;
+    
+    public static void vectorAdd(int[] a, int[] b, int[] result) {
+        int i = 0;
+        int upperBound = SPECIES.loopBound(a.length);
+        
+        // 向量化循环
+        for (; i < upperBound; i += SPECIES.length()) {
+            // 加载向量
+            IntVector va = IntVector.fromArray(SPECIES, a, i);
+            IntVector vb = IntVector.fromArray(SPECIES, b, i);
+            
+            // 向量加法
+            IntVector vr = va.add(vb);
+            
+            // 存储结果
+            vr.intoArray(result, i);
+        }
+        
+        // 处理剩余元素
+        for (; i < a.length; i++) {
+            result[i] = a[i] + b[i];
+        }
+    }
+    
+    public static void main(String[] args) {
+        int[] a = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+        int[] b = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+        int[] result = new int[a.length];
+        
+        vectorAdd(a, b, result);
+        System.out.println("结果: " + Arrays.toString(result));
+    }
+}
+```
+
+**2. 浮点数向量操作**
+```java
+public class FloatVectorExample {
+    private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_256;
+    
+    // 向量化的点积计算
+    public static float dotProduct(float[] a, float[] b) {
+        if (a.length != b.length) {
+            throw new IllegalArgumentException("数组长度不匹配");
+        }
+        
+        FloatVector sum = FloatVector.zero(SPECIES);
+        int i = 0;
+        int upperBound = SPECIES.loopBound(a.length);
+        
+        // 向量化计算
+        for (; i < upperBound; i += SPECIES.length()) {
+            FloatVector va = FloatVector.fromArray(SPECIES, a, i);
+            FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+            sum = va.fma(vb, sum); // fused multiply-add: va * vb + sum
+        }
+        
+        // 归约求和
+        float result = sum.reduceLanes(VectorOperators.ADD);
+        
+        // 处理剩余元素
+        for (; i < a.length; i++) {
+            result += a[i] * b[i];
+        }
+        
+        return result;
+    }
+    
+    public static void main(String[] args) {
+        float[] vector1 = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+        float[] vector2 = {2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+        
+        float result = dotProduct(vector1, vector2);
+        System.out.println("点积结果: " + result); // 1*2 + 2*3 + 3*4 + 4*5 + 5*6 = 70.0
+    }
+}
+```
+
+**3. 条件操作和掩码**
+```java
+public class VectorMaskExample {
+    private static final VectorSpecies<Integer> SPECIES = IntVector.SPECIES_256;
+    
+    // 条件性向量操作：将大于阈值的元素设为0，其他保持不变
+    public static void conditionalZero(int[] array, int threshold) {
+        int i = 0;
+        int upperBound = SPECIES.loopBound(array.length);
+        
+        for (; i < upperBound; i += SPECIES.length()) {
+            IntVector vector = IntVector.fromArray(SPECIES, array, i);
+            
+            // 创建掩码：标记大于阈值的元素
+            VectorMask<Integer> mask = vector.compare(VectorOperators.GT, threshold);
+            
+            // 条件性设置为0
+            IntVector result = vector.blend(IntVector.zero(SPECIES), mask);
+            
+            result.intoArray(array, i);
+        }
+        
+        // 处理剩余元素
+        for (; i < array.length; i++) {
+            if (array[i] > threshold) {
+                array[i] = 0;
+            }
+        }
+    }
+    
+    public static void main(String[] args) {
+        int[] data = {1, 5, 10, 15, 3, 8, 12, 6};
+        System.out.println("原始数据: " + Arrays.toString(data));
+        
+        conditionalZero(data, 7);
+        System.out.println("处理后: " + Arrays.toString(data)); // [1, 5, 0, 0, 3, 0, 0, 6]
+    }
+}
+```
+
+**4. 复杂数学运算**
+```java
+public class MathVectorExample {
+    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_512;
+    
+    // 向量化的平方根计算
+    public static void vectorSqrt(double[] input, double[] output) {
+        int i = 0;
+        int upperBound = SPECIES.loopBound(input.length);
+        
+        for (; i < upperBound; i += SPECIES.length()) {
+            DoubleVector vector = DoubleVector.fromArray(SPECIES, input, i);
+            DoubleVector result = vector.lanewise(VectorOperators.SQRT);
+            result.intoArray(output, i);
+        }
+        
+        // 处理剩余元素
+        for (; i < input.length; i++) {
+            output[i] = Math.sqrt(input[i]);
+        }
+    }
+    
+    // 向量化的指数运算
+    public static void vectorExp(double[] input, double[] output) {
+        int i = 0;
+        int upperBound = SPECIES.loopBound(input.length);
+        
+        for (; i < upperBound; i += SPECIES.length()) {
+            DoubleVector vector = DoubleVector.fromArray(SPECIES, input, i);
+            DoubleVector result = vector.lanewise(VectorOperators.EXP);
+            result.intoArray(output, i);
+        }
+        
+        // 处理剩余元素
+        for (; i < input.length; i++) {
+            output[i] = Math.exp(input[i]);
+        }
+    }
+    
+    public static void main(String[] args) {
+        double[] input = {1.0, 4.0, 9.0, 16.0, 25.0};
+        double[] sqrtResult = new double[input.length];
+        double[] expResult = new double[input.length];
+        
+        vectorSqrt(input, sqrtResult);
+        vectorExp(input, expResult);
+        
+        System.out.println("原始数据: " + Arrays.toString(input));
+        System.out.println("平方根: " + Arrays.toString(sqrtResult));
+        System.out.println("指数: " + Arrays.toString(expResult));
+    }
+}
+```
+
+#### 性能基准测试
+
+**标量 vs 向量性能对比**
+```java
+public class VectorBenchmark {
+    private static final int SIZE = 1_000_000;
+    private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_256;
+    
+    // 标量版本
+    public static void scalarMultiply(float[] a, float[] b, float[] result) {
+        for (int i = 0; i < a.length; i++) {
+            result[i] = a[i] * b[i];
+        }
+    }
+    
+    // 向量版本
+    public static void vectorMultiply(float[] a, float[] b, float[] result) {
+        int i = 0;
+        int upperBound = SPECIES.loopBound(a.length);
+        
+        for (; i < upperBound; i += SPECIES.length()) {
+            FloatVector va = FloatVector.fromArray(SPECIES, a, i);
+            FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+            FloatVector vr = va.mul(vb);
+            vr.intoArray(result, i);
+        }
+        
+        for (; i < a.length; i++) {
+            result[i] = a[i] * b[i];
+        }
+    }
+    
+    public static void benchmark() {
+        float[] a = new float[SIZE];
+        float[] b = new float[SIZE];
+        float[] result = new float[SIZE];
+        
+        // 初始化数据
+        for (int i = 0; i < SIZE; i++) {
+            a[i] = (float) i;
+            b[i] = (float) (i + 1);
+        }
+        
+        // 预热
+        for (int i = 0; i < 1000; i++) {
+            scalarMultiply(a, b, result);
+            vectorMultiply(a, b, result);
+        }
+        
+        // 标量版本基准测试
+        long startTime = System.nanoTime();
+        for (int i = 0; i < 1000; i++) {
+            scalarMultiply(a, b, result);
+        }
+        long scalarTime = System.nanoTime() - startTime;
+        
+        // 向量版本基准测试
+        startTime = System.nanoTime();
+        for (int i = 0; i < 1000; i++) {
+            vectorMultiply(a, b, result);
+        }
+        long vectorTime = System.nanoTime() - startTime;
+        
+        System.out.println("标量版本耗时: " + scalarTime / 1_000_000 + " ms");
+        System.out.println("向量版本耗时: " + vectorTime / 1_000_000 + " ms");
+        System.out.println("性能提升: " + (double)scalarTime / vectorTime + "x");
+    }
+}
+```
+
+#### 实际应用场景
+
+**1. 机器学习**
+*   矩阵乘法优化
+*   神经网络前向传播
+*   梯度计算加速
+
+**2. 图像处理**
+*   像素级并行处理
+*   滤波器卷积运算
+*   颜色空间转换
+
+**3. 科学计算**
+*   数值积分
+*   统计分析
+*   信号处理
+
+**4. 金融计算**
+*   蒙特卡洛模拟
+*   期权定价模型
+*   风险计算
+
+#### 使用注意事项
+
+**1. 硬件支持**
+```java
+// 检查硬件支持情况
+VectorSpecies<Float> species = FloatVector.SPECIES_PREFERRED;
+System.out.println("首选向量长度: " + species.length());
+System.out.println("向量位宽: " + species.bitSize());
+```
+
+**2. 内存对齐**
+*   确保数据在内存中正确对齐
+*   避免跨越缓存行的访问模式
+
+**3. 数据布局**
+*   优先使用连续的内存布局
+*   考虑数据的访问模式
+
+**4. 性能测量**
+*   使用 JMH 进行准确的基准测试
+*   考虑 JIT 编译的预热时间
+
+#### 限制和挑战
+
+**1. 孵化状态**
+*   API 可能在未来版本中变化
+*   需要使用 `--add-modules=jdk.incubator.vector`
+
+**2. 学习曲线**
+*   需要理解 SIMD 概念
+*   调试复杂度较高
+
+**3. 适用性**
+*   不是所有算法都能有效向量化
+*   需要足够的并行度才能获得收益
+
+#### 最佳实践
+
+1. **选择合适的向量长度**：使用 `SPECIES_PREFERRED` 获得最佳性能
+2. **处理边界情况**：正确处理不能整除向量长度的数组
+3. **内存访问优化**：保持数据的连续访问模式
+4. **性能验证**：通过基准测试验证性能提升
+5. **可维护性**：保持代码可读性，必要时提供标量版本作为备选
+
+Vector API 代表了 Java 在高性能数值计算领域的重要进步，为 CPU 密集型应用提供了接近原生代码的性能。
+
+### 22. 类文件 API (Class-File API) (Java 24, 正式)
+
+*   **演进**: 在 Java 22 作为预览特性，Java 24 成为正式特性。
+*   **核心理念**: 为解析、生成和转换 Java 类文件提供标准化的 API，替代第三方库如 ASM、Javassist 等。
+*   **核心优势**:
+    *   **官方支持**: JDK 内置，不需要额外依赖。
+    *   **类型安全**: 强类型 API，编译期错误检测。
+    *   **性能优化**: 与 JVM 内部实现紧密集成。
+    *   **版本兼容**: 自动处理不同版本的类文件格式。
+
+#### 背景与动机
+
+**传统方式的问题**
+*   第三方库（ASM、Javassist）增加依赖复杂性
+*   版本兼容性问题，新 Java 版本需要库更新
+*   性能开销和学习成本
+*   缺乏官方标准化
+
+**Class-File API 的解决方案**
+*   JDK 内置，零外部依赖
+*   与 JVM 演进同步更新
+*   统一的 API 设计范式
+*   性能优化的内部实现
+
+#### 核心 API 概述
+
+```java
+// 主要包和接口
+import java.lang.classfile.*;
+import java.lang.classfile.attribute.*;
+import java.lang.classfile.constantpool.*;
+import java.lang.classfile.instruction.*;
+
+// 主要组件：
+// 1. ClassFile - 类文件的主要入口点
+// 2. ClassModel - 表示一个类文件的模型
+// 3. ClassBuilder - 用于构建类文件
+// 4. CodeModel/CodeBuilder - 处理方法字节码
+// 5. ConstantPool - 常量池操作
+```
+
+#### 基础用法示例
+
+**1. 读取和分析类文件**
+```java
+import java.lang.classfile.*;
+import java.io.*;
+
+public class ClassFileReaderExample {
+    public static void analyzeClass(String className) throws IOException {
+        // 从类路径加载类文件
+        try (InputStream is = ClassFileReaderExample.class
+                .getResourceAsStream("/" + className.replace('.', '/') + ".class")) {
+            
+            // 解析类文件
+            ClassModel classModel = ClassFile.of().parse(is.readAllBytes());
+            
+            // 基本信息
+            System.out.println("类名: " + classModel.thisClass().asInternalName());
+            System.out.println("访问标志: " + classModel.flags());
+            System.out.println("超类: " + classModel.superclass()
+                    .map(ce -> ce.asInternalName()).orElse("无"));
+            
+            // 接口信息
+            System.out.println("实现的接口:");
+            classModel.interfaces().forEach(intf -> 
+                System.out.println("  - " + intf.asInternalName()));
+            
+            // 字段信息
+            System.out.println("字段:");
+            classModel.fields().forEach(field -> 
+                System.out.println("  - " + field.fieldName().stringValue() + 
+                                 " : " + field.fieldType().stringValue()));
+            
+            // 方法信息
+            System.out.println("方法:");
+            classModel.methods().forEach(method -> {
+                System.out.println("  - " + method.methodName().stringValue() + 
+                                 " : " + method.methodType().stringValue());
+                
+                // 分析方法字节码
+                method.code().ifPresent(codeAttr -> {
+                    System.out.println("    指令数量: " + codeAttr.elementList().size());
+                    System.out.println("    最大栈深度: " + codeAttr.maxStack());
+                    System.out.println("    本地变量槽数: " + codeAttr.maxLocals());
+                });
+            });
+        }
+    }
+    
+    public static void main(String[] args) throws IOException {
+        analyzeClass("java.lang.String");
+    }
+}
+```
+
+**2. 生成简单的类**
+```java
+import java.lang.classfile.*;
+import java.lang.constant.*;
+import java.lang.classfile.constantpool.*;
+import static java.lang.classfile.ClassFile.*;
+
+public class ClassGeneratorExample {
+    public static byte[] generateHelloWorldClass() {
+        return ClassFile.of().build(
+            // 类名
+            ClassDesc.of("com.example.HelloWorld"),
+            
+            // 类构建器
+            classBuilder -> {
+                // 类的基本信息
+                classBuilder
+                    .withFlags(AccessFlag.PUBLIC)
+                    .withSuperclass(ClassDesc.of("java.lang.Object"));
+                
+                // 添加默认构造函数
+                classBuilder.withMethod("<init>", MethodTypeDesc.of(
+                    CD_void), AccessFlag.PUBLIC, methodBuilder ->
+                    methodBuilder.withCode(codeBuilder ->
+                        codeBuilder
+                            .aload(0) // 加载 this
+                            .invokespecial(ClassDesc.of("java.lang.Object"), 
+                                         "<init>", MethodTypeDesc.of(CD_void))
+                            .return_()
+                    )
+                );
+                
+                // 添加 main 方法
+                classBuilder.withMethod("main", 
+                    MethodTypeDesc.of(CD_void, CD_String.arrayType()),
+                    AccessFlag.PUBLIC, AccessFlag.STATIC,
+                    methodBuilder ->
+                        methodBuilder.withCode(codeBuilder ->
+                            codeBuilder
+                                .getstatic(ClassDesc.of("java.lang.System"),
+                                         "out", ClassDesc.of("java.io.PrintStream"))
+                                .ldc("Hello, World!")
+                                .invokevirtual(ClassDesc.of("java.io.PrintStream"),
+                                             "println", MethodTypeDesc.of(CD_void, CD_String))
+                                .return_()
+                        )
+                );
+            }
+        );
+    }
+    
+    public static void main(String[] args) throws Exception {
+        // 生成类字节码
+        byte[] classBytes = generateHelloWorldClass();
+        
+        // 写入文件
+        try (FileOutputStream fos = new FileOutputStream("HelloWorld.class")) {
+            fos.write(classBytes);
+        }
+        
+        // 动态加载并执行
+        ClassLoader loader = new ClassLoader() {
+            @Override
+            protected Class<?> findClass(String name) throws ClassNotFoundException {
+                if ("com.example.HelloWorld".equals(name)) {
+                    return defineClass(name, classBytes, 0, classBytes.length);
+                }
+                throw new ClassNotFoundException(name);
+            }
+        };
+        
+        Class<?> clazz = loader.loadClass("com.example.HelloWorld");
+        clazz.getMethod("main", String[].class).invoke(null, (Object) new String[0]);
+    }
+}
+```
+
+**3. 字节码转换和增强**
+```java
+import java.lang.classfile.*;
+import java.lang.classfile.instruction.*;
+
+public class BytecodeTransformExample {
+    
+    // 为类的所有方法添加日志
+    public static byte[] addLoggingToClass(byte[] originalClassBytes) {
+        ClassModel originalClass = ClassFile.of().parse(originalClassBytes);
+        
+        return ClassFile.of().transform(originalClass, (classBuilder, classElement) -> {
+            if (classElement instanceof MethodModel method) {
+                // 转换方法，添加进入和退出日志
+                classBuilder.withMethod(method.methodName().stringValue(),
+                    method.methodType(), method.flags().flagsMask(),
+                    methodBuilder -> transformMethod(methodBuilder, method));
+            } else {
+                // 其他元素直接复制
+                classBuilder.with(classElement);
+            }
+        });
+    }
+    
+    private static void transformMethod(MethodBuilder methodBuilder, MethodModel originalMethod) {
+        originalMethod.code().ifPresentOrElse(
+            originalCode -> {
+                methodBuilder.withCode(codeBuilder -> {
+                    // 方法开始时的日志
+                    addLogStatement(codeBuilder, "进入方法: " + 
+                        originalMethod.methodName().stringValue());
+                    
+                    // 复制原始字节码
+                    originalCode.elementStream().forEach(codeElement -> {
+                        if (codeElement instanceof ReturnInstruction) {
+                            // 在返回前添加日志
+                            addLogStatement(codeBuilder, "退出方法: " + 
+                                originalMethod.methodName().stringValue());
+                        }
+                        codeBuilder.with(codeElement);
+                    });
+                });
+            },
+            () -> {
+                // 抽象方法或本地方法，直接复制
+                originalMethod.elementStream().forEach(methodBuilder::with);
+            }
+        );
+    }
+    
+    private static void addLogStatement(CodeBuilder codeBuilder, String message) {
+        codeBuilder
+            .getstatic(ClassDesc.of("java.lang.System"), "out", 
+                      ClassDesc.of("java.io.PrintStream"))
+            .ldc(message)
+            .invokevirtual(ClassDesc.of("java.io.PrintStream"), "println",
+                          MethodTypeDesc.of(CD_void, CD_String));
+    }
+    
+    public static void main(String[] args) throws Exception {
+        // 读取原始类文件
+        byte[] originalBytes = ClassGeneratorExample.generateHelloWorldClass();
+        
+        // 添加日志功能
+        byte[] enhancedBytes = addLoggingToClass(originalBytes);
+        
+        // 保存增强后的类
+        try (FileOutputStream fos = new FileOutputStream("HelloWorldWithLogging.class")) {
+            fos.write(enhancedBytes);
+        }
+        
+        System.out.println("增强的类已生成到 HelloWorldWithLogging.class");
+    }
+}
+```
+
+#### 与现有工具的对比
+
+| 特性 | ASM | Javassist | Class-File API |
+|------|-----|-----------|----------------|
+| JDK 内置 | ❌ | ❌ | ✅ |
+| 学习曲线 | 陡峭 | 中等 | 中等 |
+| 性能 | 高 | 中等 | 很高 |
+| 类型安全 | 低 | 中等 | 高 |
+| 版本兼容 | 需更新 | 需更新 | 自动 |
+| API 风格 | 访问者模式 | 反射式 | 构建者模式 |
+
+#### 实际应用领域
+
+**1. 框架开发**
+*   Spring 的代理生成
+*   Hibernate 的实体增强
+*   依赖注入容器
+
+**2. 开发工具**
+*   IDE 的代码分析
+*   静态分析工具
+*   代码覆盖率工具
+
+**3. 性能优化**
+*   JIT 编译器
+*   热点代码优化
+*   内存使用分析
+
+**4. 安全工具**
+*   代码混淆
+*   恶意代码检测
+*   访问控制增强
+
+#### 最佳实践
+
+1. **合理使用转换模式**：优先使用 transform 而不是完全重建
+2. **注意性能影响**：字节码操作可能影响启动时间
+3. **保持兼容性**：确保生成的字节码符合 JVM 规范
+4. **调试支持**：保留调试信息和行号映射
+5. **测试覆盖**：充分测试各种边界情况和错误路径
+
+Class-File API 为 Java 字节码操作提供了官方标准化的解决方案，预期将成为字节码工具的新标准。
 
 ---
 
@@ -3356,16 +4238,1463 @@ import module spring.boot.autoconfigure;
 
 ### 23. JShell: Java REPL 工具 (Java 9)
 
-*(待讨论...)*
+*   **演进**: Java 9 正式引入。
+*   **核心理念**: 为 Java 提供交互式编程环境（REPL - Read-Eval-Print Loop），允许逐行执行 Java 代码片段。
+*   **核心优势**:
+    *   **快速原型**: 无需完整的类结构即可测试代码片段。
+    *   **学习工具**: 非常适合 Java 初学者和实验性编程。
+    *   **调试辅助**: 快速验证表达式和方法行为。
+    *   **API 探索**: 交互式探索 Java API 和第三方库。
+
+#### 基本使用
+
+**启动 JShell**
+```bash
+# 命令行启动
+jshell
+
+# 带详细输出启动
+jshell -v
+
+# 加载外部 classpath
+jshell --class-path /path/to/libs/*
+```
+
+**基本操作示例**
+```java
+// 1. 变量声明和计算
+jshell> int x = 10
+x ==> 10
+
+jshell> int y = 20
+y ==> 20
+
+jshell> int sum = x + y
+sum ==> 30
+
+// 2. 方法定义
+jshell> int add(int a, int b) {
+   ...>     return a + b;
+   ...> }
+|  created method add(int,int)
+
+jshell> add(5, 7)
+$5 ==> 12
+
+// 3. 导入包
+jshell> import java.util.*
+
+jshell> List<String> names = Arrays.asList("Alice", "Bob", "Charlie")
+names ==> [Alice, Bob, Charlie]
+
+// 4. 流式操作
+jshell> names.stream()
+   ...>      .filter(name -> name.startsWith("A"))
+   ...>      .collect(Collectors.toList())
+$8 ==> [Alice]
+```
+
+#### 高级特性
+
+**1. 多行编辑和代码块**
+```java
+// 类定义
+jshell> class Person {
+   ...>     private String name;
+   ...>     private int age;
+   ...>     
+   ...>     public Person(String name, int age) {
+   ...>         this.name = name;
+   ...>         this.age = age;
+   ...>     }
+   ...>     
+   ...>     public String toString() {
+   ...>         return name + " (" + age + ")";
+   ...>     }
+   ...> }
+|  created class Person
+
+jshell> Person p = new Person("Alice", 25)
+p ==> Alice (25)
+```
+
+**2. 代码片段管理**
+```java
+// 查看已定义的变量
+jshell> /vars
+|    int x = 10
+|    int y = 20
+|    int sum = 30
+|    List<String> names = [Alice, Bob, Charlie]
+|    Person p = Alice (25)
+
+// 查看已定义的方法
+jshell> /methods
+|    int add(int,int)
+
+// 查看历史记录
+jshell> /history
+
+// 保存会话到文件
+jshell> /save mycode.jsh
+
+// 加载文件
+jshell> /open mycode.jsh
+```
+
+**3. 外部编辑器集成**
+```java
+// 设置外部编辑器
+jshell> /set editor vim
+
+// 编辑代码片段
+jshell> /edit add
+// 打开外部编辑器编辑 add 方法
+```
+
+#### 实用命令大全
+
+```java
+// === 基础命令 ===
+/help                 // 显示帮助
+/exit                 // 退出 JShell
+/quit                 // 退出 JShell
+
+// === 代码管理 ===
+/list                 // 显示当前会话中的代码
+/vars                 // 显示变量
+/methods              // 显示方法
+/types                // 显示类型
+/imports              // 显示导入
+
+// === 文件操作 ===
+/save filename        // 保存会话
+/open filename        // 加载文件
+/drop name            // 删除变量/方法/类
+
+// === 环境设置 ===
+/set editor cmd       // 设置编辑器
+/set start filename   // 设置启动脚本
+/set mode verbose     // 设置详细模式
+/set feedback verbose // 设置反馈级别
+
+// === 调试信息 ===
+/history              // 命令历史
+/reload               // 重新加载会话
+/reset                // 重置 JShell 环境
+```
+
+#### 实际应用场景
+
+**1. 算法验证**
+```java
+jshell> // 快速验证排序算法
+jshell> int[] arr = {64, 34, 25, 12, 22, 11, 90}
+arr ==> int[7] { 64, 34, 25, 12, 22, 11, 90 }
+
+jshell> // 冒泡排序实现
+jshell> void bubbleSort(int[] arr) {
+   ...>     int n = arr.length;
+   ...>     for (int i = 0; i < n-1; i++) {
+   ...>         for (int j = 0; j < n-i-1; j++) {
+   ...>             if (arr[j] > arr[j+1]) {
+   ...>                 int temp = arr[j];
+   ...>                 arr[j] = arr[j+1];
+   ...>                 arr[j+1] = temp;
+   ...>             }
+   ...>         }
+   ...>     }
+   ...> }
+
+jshell> bubbleSort(arr)
+jshell> Arrays.toString(arr)
+$12 ==> "[11, 12, 22, 25, 34, 64, 90]"
+```
+
+**2. API 探索**
+```java
+jshell> // 探索 Stream API
+jshell> List<Integer> numbers = IntStream.range(1, 10)
+   ...>                                   .boxed()
+   ...>                                   .collect(Collectors.toList())
+
+jshell> numbers.stream()
+   ...>        .filter(n -> n % 2 == 0)
+   ...>        .map(n -> n * n)
+   ...>        .collect(Collectors.toList())
+$15 ==> [4, 16, 36, 64]
+```
+
+**3. 正则表达式测试**
+```java
+jshell> import java.util.regex.*
+
+jshell> String text = "Java 21 and Spring Boot 3.0"
+text ==> "Java 21 and Spring Boot 3.0"
+
+jshell> Pattern pattern = Pattern.compile("\\d+(\\.\\d+)*")
+pattern ==> \d+(\.\d+)*
+
+jshell> Matcher matcher = pattern.matcher(text)
+matcher ==> java.util.regex.Matcher[pattern=\d+(\.\d+)* region=0,26 lastmatch=]
+
+jshell> while (matcher.find()) {
+   ...>     System.out.println("Found: " + matcher.group());
+   ...> }
+Found: 21
+Found: 3.0
+```
+
+**4. 数据分析**
+```java
+jshell> // 简单的数据分析
+jshell> double[] scores = {85.5, 92.0, 78.5, 95.0, 88.0, 91.5}
+scores ==> double[6] { 85.5, 92.0, 78.5, 95.0, 88.0, 91.5 }
+
+jshell> // 计算平均分
+jshell> double average = Arrays.stream(scores).average().orElse(0.0)
+average ==> 88.41666666666667
+
+jshell> // 找出最高分
+jshell> double max = Arrays.stream(scores).max().orElse(0.0)
+max ==> 95.0
+
+jshell> // 统计及格人数（假设60分及格）
+jshell> long passCount = Arrays.stream(scores)
+   ...>                           .filter(score -> score >= 60)
+   ...>                           .count()
+passCount ==> 6
+```
+
+#### 教学和学习应用
+
+**1. 概念演示**
+```java
+// 演示面向对象概念
+jshell> abstract class Animal {
+   ...>     protected String name;
+   ...>     public Animal(String name) { this.name = name; }
+   ...>     public abstract void makeSound();
+   ...>     public void sleep() { System.out.println(name + " is sleeping"); }
+   ...> }
+
+jshell> class Dog extends Animal {
+   ...>     public Dog(String name) { super(name); }
+   ...>     public void makeSound() { System.out.println(name + " says Woof!"); }
+   ...> }
+
+jshell> Animal dog = new Dog("Buddy")
+dog ==> Dog@...
+
+jshell> dog.makeSound()
+Buddy says Woof!
+```
+
+**2. 设计模式演示**
+```java
+// 快速演示单例模式
+jshell> class Singleton {
+   ...>     private static Singleton instance = null;
+   ...>     private Singleton() {}
+   ...>     public static Singleton getInstance() {
+   ...>         if (instance == null) {
+   ...>             instance = new Singleton();
+   ...>         }
+   ...>         return instance;
+   ...>     }
+   ...> }
+
+jshell> Singleton s1 = Singleton.getInstance()
+jshell> Singleton s2 = Singleton.getInstance()
+jshell> s1 == s2
+$25 ==> true
+```
+
+#### 集成开发
+
+**启动脚本示例**
+```java
+// 创建 startup.jsh 文件
+import java.util.*;
+import java.util.stream.*;
+import java.time.*;
+import java.math.*;
+
+// 常用工具方法
+void println(Object obj) {
+    System.out.println(obj);
+}
+
+String now() {
+    return LocalDateTime.now().toString();
+}
+
+// 使用启动脚本
+// jshell startup.jsh
+```
+
+**与 IDE 集成**
+*   IntelliJ IDEA: 内置 JShell 控制台
+*   Eclipse: 通过插件支持
+*   VS Code: 通过 Java 扩展支持
+
+JShell 极大地提升了 Java 的交互性和学习体验，是现代 Java 开发的重要工具。
 
 ### 24. 单文件源码程序启动 (Java 11)
 
-*(待讨论...)*
+*   **演进**: Java 11 正式引入。
+*   **核心理念**: 允许直接运行单个 `.java` 文件，无需先编译成 `.class` 文件，简化小型程序和脚本的开发流程。
+*   **核心优势**:
+    *   **零配置**: 无需构建工具或复杂的项目结构。
+    *   **快速原型**: 适合编写工具脚本和一次性程序。
+    *   **学习友好**: 降低 Java 学习门槛。
+    *   **脚本化**: Java 程序可以像脚本语言一样使用。
+
+#### 基本使用方法
+
+**传统方式 vs 单文件启动**
+```java
+// === 传统方式 ===
+// 1. 编写 HelloWorld.java
+public class HelloWorld {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
+
+// 2. 编译
+// javac HelloWorld.java
+
+// 3. 运行
+// java HelloWorld
+
+// === 单文件启动方式 ===
+// 直接运行（Java 11+）
+// java HelloWorld.java
+```
+
+**命令语法**
+```bash
+# 基本语法
+java [OPTIONS] <source-file> [args...]
+
+# 示例
+java HelloWorld.java
+java --class-path /path/to/libs MyScript.java arg1 arg2
+java -Dproperty=value Script.java
+```
+
+#### 实际应用示例
+
+**1. 系统工具脚本**
+```java
+// FileStats.java - 文件统计工具
+import java.nio.file.*;
+import java.io.IOException;
+import java.util.stream.Stream;
+
+public class FileStats {
+    public static void main(String[] args) throws IOException {
+        if (args.length == 0) {
+            System.out.println("用法: java FileStats.java <目录路径>");
+            System.exit(1);
+        }
+        
+        Path directory = Paths.get(args[0]);
+        if (!Files.isDirectory(directory)) {
+            System.err.println("错误: " + args[0] + " 不是一个目录");
+            System.exit(1);
+        }
+        
+        try (Stream<Path> files = Files.walk(directory)) {
+            var stats = files
+                .filter(Files::isRegularFile)
+                .collect(java.util.stream.Collectors.groupingBy(
+                    FileStats::getFileExtension,
+                    java.util.stream.Collectors.counting()
+                ));
+            
+            System.out.println("文件统计 - " + directory + ":");
+            stats.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .forEach(entry -> 
+                    System.out.printf("  %s: %d 个文件\n", 
+                        entry.getKey(), entry.getValue()));
+                        
+            long totalFiles = stats.values().stream()
+                .mapToLong(Long::longValue).sum();
+            System.out.println("总计: " + totalFiles + " 个文件");
+        }
+    }
+    
+    private static String getFileExtension(Path file) {
+        String fileName = file.getFileName().toString();
+        int lastDot = fileName.lastIndexOf('.');
+        return lastDot > 0 ? fileName.substring(lastDot) : "[无扩展名]";
+    }
+}
+
+// 使用: java FileStats.java /path/to/directory
+```
+
+**2. 网络工具**
+```java
+// HttpChecker.java - HTTP 状态检查工具
+import java.net.http.*;
+import java.net.*;
+import java.time.Duration;
+import java.io.IOException;
+
+public class HttpChecker {
+    public static void main(String[] args) {
+        if (args.length == 0) {
+            System.out.println("用法: java HttpChecker.java <URL1> <URL2> ...");
+            System.exit(1);
+        }
+        
+        HttpClient client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
+            
+        for (String url : args) {
+            checkUrl(client, url);
+        }
+    }
+    
+    private static void checkUrl(HttpClient client, String url) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(30))
+                .GET()
+                .build();
+                
+            long startTime = System.currentTimeMillis();
+            HttpResponse<String> response = client.send(request, 
+                HttpResponse.BodyHandlers.ofString());
+            long responseTime = System.currentTimeMillis() - startTime;
+            
+            System.out.printf("%s - 状态: %d, 响应时间: %d ms\n", 
+                url, response.statusCode(), responseTime);
+                
+        } catch (IOException | InterruptedException e) {
+            System.err.printf("%s - 错误: %s\n", url, e.getMessage());
+        }
+    }
+}
+
+// 使用: java HttpChecker.java https://google.com https://github.com
+```
+
+**3. 数据处理脚本**
+```java
+// CsvAnalyzer.java - CSV 文件分析器
+import java.nio.file.*;
+import java.util.*;
+import java.util.stream.*;
+import java.io.IOException;
+
+public class CsvAnalyzer {
+    public static void main(String[] args) throws IOException {
+        if (args.length < 2) {
+            System.out.println("用法: java CsvAnalyzer.java <CSV文件> <列号>");
+            System.exit(1);
+        }
+        
+        String filename = args[0];
+        int columnIndex = Integer.parseInt(args[1]) - 1; // 转为0基索引
+        
+        List<String> lines = Files.readAllLines(Paths.get(filename));
+        if (lines.isEmpty()) {
+            System.out.println("文件为空");
+            return;
+        }
+        
+        // 跳过标题行，提取指定列的数据
+        List<Double> values = lines.stream()
+            .skip(1) // 跳过标题
+            .map(line -> line.split(","))
+            .filter(parts -> parts.length > columnIndex)
+            .map(parts -> parts[columnIndex].trim())
+            .filter(value -> !value.isEmpty())
+            .mapToDouble(Double::parseDouble)
+            .boxed()
+            .collect(Collectors.toList());
+            
+        if (values.isEmpty()) {
+            System.out.println("没有找到有效的数值数据");
+            return;
+        }
+        
+        // 统计分析
+        DoubleSummaryStatistics stats = values.stream()
+            .mapToDouble(Double::doubleValue)
+            .summaryStatistics();
+            
+        System.out.printf("第 %d 列数据分析:\n", Integer.parseInt(args[1]));
+        System.out.printf("  数据个数: %d\n", stats.getCount());
+        System.out.printf("  最小值: %.2f\n", stats.getMin());
+        System.out.printf("  最大值: %.2f\n", stats.getMax());
+        System.out.printf("  平均值: %.2f\n", stats.getAverage());
+        System.out.printf("  总和: %.2f\n", stats.getSum());
+        
+        // 中位数
+        Collections.sort(values);
+        double median = values.size() % 2 == 0 ?
+            (values.get(values.size()/2 - 1) + values.get(values.size()/2)) / 2.0 :
+            values.get(values.size()/2);
+        System.out.printf("  中位数: %.2f\n", median);
+    }
+}
+
+// 使用: java CsvAnalyzer.java data.csv 3
+```
+
+**4. 文本处理工具**
+```java
+// TextProcessor.java - 文本处理工具
+import java.nio.file.*;
+import java.util.*;
+import java.util.regex.*;
+import java.io.IOException;
+
+public class TextProcessor {
+    public static void main(String[] args) throws IOException {
+        if (args.length < 2) {
+            printUsage();
+            System.exit(1);
+        }
+        
+        String command = args[0];
+        String filename = args[1];
+        
+        String content = Files.readString(Paths.get(filename));
+        
+        switch (command.toLowerCase()) {
+            case "count" -> countWords(content);
+            case "lines" -> countLines(content);
+            case "find" -> findPattern(content, args[2]);
+            case "replace" -> replacePattern(content, args[2], args[3], filename);
+            default -> {
+                System.err.println("未知命令: " + command);
+                printUsage();
+            }
+        }
+    }
+    
+    private static void printUsage() {
+        System.out.println("用法:");
+        System.out.println("  java TextProcessor.java count <文件>     - 统计单词");
+        System.out.println("  java TextProcessor.java lines <文件>     - 统计行数");
+        System.out.println("  java TextProcessor.java find <文件> <正则>  - 查找模式");
+        System.out.println("  java TextProcessor.java replace <文件> <查找> <替换> - 替换文本");
+    }
+    
+    private static void countWords(String content) {
+        String[] words = content.trim().split("\\s+");
+        System.out.println("单词数: " + (content.trim().isEmpty() ? 0 : words.length));
+        
+        Map<String, Integer> wordFreq = new HashMap<>();
+        for (String word : words) {
+            word = word.toLowerCase().replaceAll("[^a-zA-Z0-9]", "");
+            if (!word.isEmpty()) {
+                wordFreq.merge(word, 1, Integer::sum);
+            }
+        }
+        
+        System.out.println("\n高频词汇 (前10个):");
+        wordFreq.entrySet().stream()
+            .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+            .limit(10)
+            .forEach(entry -> System.out.printf("  %s: %d 次\n", 
+                entry.getKey(), entry.getValue()));
+    }
+    
+    private static void countLines(String content) {
+        long lineCount = content.lines().count();
+        long nonEmptyLines = content.lines()
+            .filter(line -> !line.trim().isEmpty())
+            .count();
+            
+        System.out.println("总行数: " + lineCount);
+        System.out.println("非空行数: " + nonEmptyLines);
+    }
+    
+    private static void findPattern(String content, String regex) {
+        Pattern pattern = Pattern.compile(regex, Pattern.MULTILINE);
+        Matcher matcher = pattern.matcher(content);
+        
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+            System.out.printf("匹配 %d: %s (位置: %d-%d)\n", 
+                count, matcher.group(), matcher.start(), matcher.end());
+        }
+        
+        if (count == 0) {
+            System.out.println("未找到匹配项");
+        } else {
+            System.out.println("\n总计找到 " + count + " 个匹配项");
+        }
+    }
+    
+    private static void replacePattern(String content, String find, 
+                                     String replace, String filename) throws IOException {
+        String newContent = content.replaceAll(find, replace);
+        String outputFile = filename + ".new";
+        Files.writeString(Paths.get(outputFile), newContent);
+        System.out.println("替换完成，结果保存到: " + outputFile);
+    }
+}
+
+// 使用示例:
+// java TextProcessor.java count document.txt
+// java TextProcessor.java find document.txt "\\b\\w+@\\w+\\.\\w+\\b"
+```
+
+#### 高级特性和限制
+
+**支持的特性**
+*   完整的 Java 语言特性
+*   导入外部库（通过 --class-path）
+*   JVM 参数传递
+*   程序参数传递
+*   系统属性设置
+
+**限制条件**
+*   只能包含一个公共类
+*   类名必须与文件名匹配
+*   不支持包声明
+*   编译是临时的，不生成 .class 文件
+
+**性能考虑**
+*   首次运行需要编译时间
+*   适合小型程序和脚本
+*   不适合大型应用程序
+
+#### 与脚本语言的对比
+
+| 特性 | Java 单文件 | Python | Node.js |
+|------|-------------|--------|---------|
+| 性能 | 高（JVM） | 中等 | 高（V8） |
+| 启动速度 | 慢（JVM 启动） | 快 | 快 |
+| 类型安全 | 强类型 | 动态类型 | 动态类型 |
+| 生态系统 | Java 生态 | 丰富 | 丰富 |
+| 学习曲线 | 中等 | 简单 | 简单 |
+
+#### 实际部署建议
+
+**1. Shebang 支持（Unix/Linux）**
+```java
+#!/usr/bin/java --source 11
+// MyScript.java
+public class MyScript {
+    public static void main(String[] args) {
+        System.out.println("这是一个可执行的 Java 脚本!");
+    }
+}
+```
+
+```bash
+# 使脚本可执行
+chmod +x MyScript.java
+
+# 直接运行
+./MyScript.java
+```
+
+**2. 容器化部署**
+```dockerfile
+# Dockerfile
+FROM openjdk:11-jre-slim
+COPY script.java /app/
+WORKDIR /app
+ENTRYPOINT ["java", "script.java"]
+```
+
+**最佳实践**
+1. **适合场景**: 工具脚本、原型开发、教学演示
+2. **避免场景**: 大型应用、生产环境的核心服务
+3. **性能优化**: 使用 GraalVM 原生编译提升启动速度
+4. **代码组织**: 保持单文件的简洁性，复杂逻辑考虑传统项目结构
+
+单文件源码程序启动为 Java 开发带来了脚本化的便利性，是现代 Java 生态系统的重要补充。
 
 ### 25. 更详尽的 NullPointerException (Java 14)
 
-*(待讨论...)*
+*   **演进**: Java 14 正式引入。
+*   **核心理念**: 提供更精确、更有用的 NullPointerException 错误信息，帮助开发者快速定位和解决问题。
+*   **核心优势**:
+    *   **精确定位**: 明确指出哪个具体的引用为 null。
+    *   **调试助手**: 显著减少调试时间和心智负担。
+    *   **学习友好**: 帮助初学者理解错误原因。
+    *   **生产可用**: 提升生产环境的问题诊断效率。
+
+#### 传统 vs 增强版对比
+
+**传统的 NullPointerException**
+```java
+// 代码示例
+public class Person {
+    private String name;
+    private Address address;
+    
+    // getters and setters...
+    
+    public void printStreetName() {
+        // 这行代码可能抛出 NPE
+        System.out.println(address.getStreet().getName().toUpperCase());
+    }
+}
+
+class Address {
+    private Street street;
+    // ...
+}
+
+class Street {
+    private String name;
+    // ...
+}
+
+// 传统错误信息（Java 13 及以前）
+// Exception in thread "main" java.lang.NullPointerException
+//     at Person.printStreetName(Person.java:10)
+```
+
+**增强版的 NullPointerException**
+```java
+// 同样的代码，Java 14+ 的错误信息
+// Exception in thread "main" java.lang.NullPointerException: 
+//     Cannot invoke "Street.getName()" because the return value of 
+//     "Address.getStreet()" is null
+//     at Person.printStreetName(Person.java:10)
+```
+
+#### 详细示例对比
+
+**1. 方法调用链**
+```java
+public class ChainedCallExample {
+    public static void main(String[] args) {
+        User user = new User();
+        
+        // 这行代码会抛出 NPE
+        String country = user.getProfile().getAddress().getCountry().toUpperCase();
+        System.out.println(country);
+    }
+}
+
+class User {
+    private Profile profile;
+    public Profile getProfile() { return profile; } // 返回 null
+}
+
+class Profile {
+    private Address address;
+    public Address getAddress() { return address; }
+}
+
+class Address {
+    private String country;
+    public String getCountry() { return country; }
+}
+
+// Java 13 及以前的错误信息
+// java.lang.NullPointerException
+//     at ChainedCallExample.main(ChainedCallExample.java:6)
+
+// Java 14+ 的增强错误信息
+// java.lang.NullPointerException: Cannot invoke "Profile.getAddress()" 
+//     because the return value of "User.getProfile()" is null
+//     at ChainedCallExample.main(ChainedCallExample.java:6)
+```
+
+**2. 数组访问**
+```java
+public class ArrayAccessExample {
+    public static void main(String[] args) {
+        String[][] matrix = new String[3][];
+        
+        // 这行会抛出 NPE
+        int length = matrix[1].length;
+        System.out.println(length);
+    }
+}
+
+// Java 13 及以前
+// java.lang.NullPointerException
+//     at ArrayAccessExample.main(ArrayAccessExample.java:6)
+
+// Java 14+
+// java.lang.NullPointerException: Cannot read the array length 
+//     because "matrix[1]" is null
+//     at ArrayAccessExample.main(ArrayAccessExample.java:6)
+```
+
+**3. 字段访问**
+```java
+public class FieldAccessExample {
+    private static class Container {
+        String value;
+    }
+    
+    public static void main(String[] args) {
+        Container container = null;
+        
+        // 这行会抛出 NPE
+        System.out.println(container.value);
+    }
+}
+
+// Java 13 及以前
+// java.lang.NullPointerException
+//     at FieldAccessExample.main(FieldAccessExample.java:9)
+
+// Java 14+
+// java.lang.NullPointerException: Cannot read field "value" 
+//     because "container" is null
+//     at FieldAccessExample.main(FieldAccessExample.java:9)
+```
+
+**4. 数组元素赋值**
+```java
+public class ArrayAssignmentExample {
+    public static void main(String[] args) {
+        int[][] matrix = new int[3][];
+        
+        // 这行会抛出 NPE
+        matrix[0][1] = 42;
+    }
+}
+
+// Java 14+ 增强错误信息
+// java.lang.NullPointerException: Cannot store to int array 
+//     because "matrix[0]" is null
+//     at ArrayAssignmentExample.main(ArrayAssignmentExample.java:6)
+```
+
+**5. synchronized 语句**
+```java
+public class SynchronizedExample {
+    public static void main(String[] args) {
+        Object lock = null;
+        
+        // 这行会抛出 NPE
+        synchronized (lock) {
+            System.out.println("不会执行到这里");
+        }
+    }
+}
+
+// Java 14+ 增强错误信息
+// java.lang.NullPointerException: Cannot enter synchronized block 
+//     because "lock" is null
+//     at SynchronizedExample.main(SynchronizedExample.java:6)
+```
+
+#### 复杂场景示例
+
+**涉及泛型和集合**
+```java
+import java.util.*;
+
+public class ComplexExample {
+    public static void main(String[] args) {
+        Map<String, List<Person>> groups = new HashMap<>();
+        groups.put("team1", null);
+        
+        // 这行会抛出详细的 NPE
+        int teamSize = groups.get("team1").size();
+        System.out.println(teamSize);
+    }
+    
+    static class Person {
+        String name;
+        Person(String name) { this.name = name; }
+    }
+}
+
+// Java 14+ 增强错误信息
+// java.lang.NullPointerException: Cannot invoke "java.util.List.size()" 
+//     because the return value of "java.util.Map.get(Object)" is null
+//     at ComplexExample.main(ComplexExample.java:9)
+```
+
+**嵌套方法调用**
+```java
+public class NestedCallExample {
+    public static void main(String[] args) {
+        Calculator calc = new Calculator();
+        
+        // 复杂的嵌套调用
+        double result = calc.getOperations().getAdvanced().sqrt(
+            calc.getMemory().recall().getValue()
+        );
+        System.out.println(result);
+    }
+    
+    static class Calculator {
+        public Operations getOperations() { return new Operations(); }
+        public Memory getMemory() { return null; } // 返回 null
+    }
+    
+    static class Operations {
+        public Advanced getAdvanced() { return new Advanced(); }
+    }
+    
+    static class Advanced {
+        public double sqrt(double value) { return Math.sqrt(value); }
+    }
+    
+    static class Memory {
+        public StoredValue recall() { return new StoredValue(42.0); }
+    }
+    
+    static class StoredValue {
+        private double value;
+        StoredValue(double value) { this.value = value; }
+        public double getValue() { return value; }
+    }
+}
+
+// Java 14+ 增强错误信息
+// java.lang.NullPointerException: Cannot invoke "NestedCallExample$Memory.recall()" 
+//     because the return value of "NestedCallExample$Calculator.getMemory()" is null
+//     at NestedCallExample.main(NestedCallExample.java:7)
+```
+
+#### 如何启用/禁用
+
+**JVM 参数控制**
+```bash
+# 启用详细 NPE 信息（Java 14+ 默认启用）
+java -XX:+ShowCodeDetailsInExceptionMessages MyClass
+
+# 禁用详细 NPE 信息
+java -XX:-ShowCodeDetailsInExceptionMessages MyClass
+
+# 查看当前设置
+java -XX:+PrintFlagsFinal | grep ShowCodeDetailsInExceptionMessages
+```
+
+#### 实际开发中的价值
+
+**1. 快速问题定位**
+```java
+// 在复杂的业务逻辑中快速定位问题
+public class BusinessLogicExample {
+    public void processOrder(Order order) {
+        // 这里有很多链式调用
+        String customerEmail = order.getCustomer()
+                                   .getContactInfo()
+                                   .getEmailAddress()
+                                   .toLowerCase();
+        
+        // 有了详细的 NPE 信息，能立刻知道是哪一步出了问题
+        sendConfirmationEmail(customerEmail);
+    }
+}
+```
+
+**2. 单元测试调试**
+```java
+@Test
+public void testComplexDataProcessing() {
+    DataProcessor processor = new DataProcessor();
+    
+    // 在测试中如果出现 NPE，现在能更容易定位问题
+    Result result = processor.process(
+        mockData.getDataSet()
+                .getRecords()
+                .stream()
+                .filter(record -> record.isValid())
+                .collect(Collectors.toList())
+    );
+    
+    assertNotNull(result);
+}
+```
+
+**3. 生产问题诊断**
+```java
+// 在生产环境的日志中，现在能看到更有用的信息
+public class ProductionExample {
+    public void handleRequest(HttpServletRequest request) {
+        try {
+            User user = sessionManager.getUser(request.getSession())
+                                     .orElseThrow(() -> new UnauthorizedException());
+            
+            String preference = user.getSettings()
+                                   .getDisplaySettings()
+                                   .getTheme();
+            
+            renderPage(preference);
+        } catch (NullPointerException e) {
+            // 现在日志中会显示具体是哪个对象为 null
+            logger.error("处理请求时出错: {}", e.getMessage(), e);
+            response.sendError(500, "内部错误");
+        }
+    }
+}
+```
+
+#### 性能影响和考虑
+
+**性能测试结果**
+*   无明显的运行时性能影响
+*   错误信息生成只在抛出异常时发生
+*   对正常代码执行无影响
+
+**适用场景**
+*   开发和测试环境（强烈推荐启用）
+*   生产环境的问题诊断
+*   初学者学习 Java
+*   代码审查和调试
+
+**不适用场景**
+*   对安全极其敏感的环境（可能泄露代码结构信息）
+*   超高性能要求的场景（可考虑禁用）
+
+#### 最佳实践
+
+1. **开发环境始终启用**: 可显著提升开发效率
+2. **日志记录**: 将详细错误信息记录在日志中
+3. **防御式编程**: 仍然需要主动进行 null 检查
+4. **单元测试**: 利用详细信息优化测试用例
+5. **团队分享**: 向团队成员科普这一特性的价值
+
+更详尽的 NullPointerException 是 Java 平台的一个重要改进，显著提升了开发者的调试体验。
 
 ### 26. 飞行记录器 (JFR) (Java 11)
 
-*(待讨论...)*
+*   **演进**: 在 Java 11 成为正式特性，之前是 Oracle JDK 的商业特性。
+*   **核心理念**: 提供低开销、生产可用的应用程序性能监控和问题诊断工具。
+*   **核心优势**:
+    *   **低开销**: 通常仅增加 1-3% 的性能开销。
+    *   **生产可用**: 可在生产环境中安全使用。
+    *   **全面监控**: 涵盖内存、CPU、I/O、锁等各个方面。
+    *   **实时分析**: 提供实时的性能数据和问题警告。
+
+#### JFR 的核心概念
+
+**事件（Events）**
+*   JFR 基于事件的数据收集模型
+*   每个事件包含时间戳、线程信息和具体数据
+*   内置数百种预定义事件类型
+
+**记录（Recording）**
+*   一次数据收集的会话
+*   可以设置收集的时间、事件类型和等级
+*   支持持续记录和定时记录
+
+**配置文件（Profiles）**
+*   预定义的事件集合和设置
+*   内置 `default` 和 `profile` 两种配置
+
+#### 基本使用方法
+
+**1. 命令行启动 JFR**
+```bash
+# 基本记录命令
+java -XX:+FlightRecorder \
+     -XX:StartFlightRecording=duration=60s,filename=myapp.jfr \
+     MyApplication
+
+# 使用特定配置
+java -XX:+FlightRecorder \
+     -XX:StartFlightRecording=duration=5m,filename=profiling.jfr,settings=profile \
+     MyApplication
+
+# 持续记录（手动停止）
+java -XX:+FlightRecorder \
+     -XX:StartFlightRecording=filename=continuous.jfr \
+     MyApplication
+```
+
+**2. 程序化控制**
+```java
+import jdk.jfr.*;
+
+public class JfrProgrammaticExample {
+    public static void main(String[] args) throws Exception {
+        // 创建记录
+        Recording recording = new Recording();
+        
+        // 配置记录
+        recording.setDuration(Duration.ofMinutes(1));
+        recording.setDestination(Paths.get("app-recording.jfr"));
+        
+        // 启用特定事件
+        recording.enable("jdk.GarbageCollection");
+        recording.enable("jdk.JavaMonitorEnter");
+        recording.enable("jdk.FileRead");
+        recording.enable("jdk.FileWrite");
+        
+        // 开始记录
+        recording.start();
+        
+        // 模拟一些工作负载
+        performBusinessLogic();
+        
+        // 停止记录
+        recording.stop();
+        
+        System.out.println("记录已保存到: " + recording.getDestination());
+    }
+    
+    private static void performBusinessLogic() throws InterruptedException {
+        // 模拟一些 CPU 密集和 I/O 密集的操作
+        for (int i = 0; i < 1000; i++) {
+            // CPU 密集操作
+            double result = Math.sqrt(Math.random() * 1000000);
+            
+            // 内存分配
+            List<String> tempList = new ArrayList<>();
+            for (int j = 0; j < 100; j++) {
+                tempList.add("测试数据-" + j);
+            }
+            
+            Thread.sleep(10);
+        }
+    }
+}
+```
+
+**3. 自定义事件**
+```java
+import jdk.jfr.*;
+
+// 定义自定义事件
+@Name("com.example.UserLogin")
+@Label("用户登录事件")
+@Description("记录用户登录相关信息")
+@Category("Application")
+public class UserLoginEvent extends Event {
+    @Label("用户ID")
+    public String userId;
+    
+    @Label("登录方式")
+    public String loginMethod;
+    
+    @Label("成功标志")
+    public boolean success;
+    
+    @Label("响应时间(ms)")
+    public long responseTime;
+}
+
+// 使用自定义事件
+public class UserService {
+    public boolean authenticateUser(String userId, String password, String method) {
+        // 创建事件实例
+        UserLoginEvent event = new UserLoginEvent();
+        event.userId = userId;
+        event.loginMethod = method;
+        event.begin(); // 开始记录时间
+        
+        long startTime = System.currentTimeMillis();
+        
+        try {
+            // 模拟认证逻辑
+            boolean authenticated = performAuthentication(userId, password);
+            
+            event.success = authenticated;
+            event.responseTime = System.currentTimeMillis() - startTime;
+            
+            return authenticated;
+            
+        } finally {
+            // 提交事件
+            event.commit();
+        }
+    }
+    
+    private boolean performAuthentication(String userId, String password) {
+        // 模拟认证逻辑
+        try {
+            Thread.sleep(50); // 模拟数据库查询时间
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return Math.random() > 0.1; // 90% 成功率
+    }
+}
+```
+
+#### JFR 数据分析工具
+
+**1. Java Mission Control (JMC)**
+```bash
+# 下载并启动 JMC
+# https://jdk.java.net/jmc/
+jmc
+
+# 或者使用 Java 8 自带的版本
+jmc &
+```
+
+**JMC 主要功能**:
+*   性能监控仪表板
+*   CPU 使用率分析
+*   内存分配和垃圾回收分析
+*   线程和锁分析
+*   I/O 操作分析
+*   自定义事件视图
+
+**2. 命令行分析工具**
+```bash
+# 使用 jfr 命令行工具
+# 打印记录摘要
+jfr print --events CPULoad,GarbageCollection myapp.jfr
+
+# 按事件类型统计
+jfr summary myapp.jfr
+
+# 转换为 JSON 格式
+jfr print --json --events jdk.GarbageCollection myapp.jfr > gc_events.json
+
+# 查看所有可用事件类型
+jfr metadata myapp.jfr
+```
+
+#### 常用监控场景
+
+**1. 性能问题诊断**
+```java
+// 模拟性能问题的代码
+public class PerformanceIssueExample {
+    private static final Random random = new Random();
+    
+    public static void main(String[] args) {
+        // 启动 JFR 记录
+        startRecording();
+        
+        // 模拟不同类型的性能问题
+        for (int i = 0; i < 1000; i++) {
+            if (i % 100 == 0) {
+                System.out.println("处理进度: " + (i * 100 / 1000) + "%");
+            }
+            
+            // CPU 密集操作
+            performCpuIntensiveTask();
+            
+            // 内存分配
+            createTemporaryObjects();
+            
+            // I/O 操作
+            performIoOperation();
+            
+            // 线程同步
+            performSynchronizedOperation();
+        }
+    }
+    
+    private static void startRecording() {
+        try {
+            Recording recording = new Recording();
+            recording.enable("jdk.CPULoad").withPeriod(Duration.ofSeconds(1));
+            recording.enable("jdk.GarbageCollection");
+            recording.enable("jdk.JavaMonitorEnter");
+            recording.enable("jdk.FileRead");
+            recording.enable("jdk.FileWrite");
+            recording.setDestination(Paths.get("performance-analysis.jfr"));
+            recording.start();
+            
+            // 注册关闭钩子
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                recording.stop();
+                System.out.println("性能记录已保存到: performance-analysis.jfr");
+            }));
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    
+    private static void performCpuIntensiveTask() {
+        // 模拟 CPU 密集计算
+        double result = 0;
+        for (int i = 0; i < 10000; i++) {
+            result += Math.sqrt(Math.random() * 1000);
+        }
+    }
+    
+    private static void createTemporaryObjects() {
+        // 模拟大量对象创建
+        List<String> tempData = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            tempData.add("临时数据-" + i + "-" + System.nanoTime());
+        }
+        // tempData 将被 GC 回收
+    }
+    
+    private static void performIoOperation() {
+        try {
+            // 模拟文件 I/O
+            Path tempFile = Files.createTempFile("jfr-test", ".tmp");
+            Files.write(tempFile, "test data".getBytes());
+            Files.readAllLines(tempFile);
+            Files.delete(tempFile);
+        } catch (Exception e) {
+            // 忽略错误
+        }
+    }
+    
+    private static final Object lock = new Object();
+    
+    private static void performSynchronizedOperation() {
+        synchronized (lock) {
+            try {
+                Thread.sleep(1); // 模拟同步操作
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+}
+```
+
+**2. 内存泄露检测**
+```java
+@Name("com.example.MemoryLeak")
+@Label("内存泄露检测")
+@Category("Memory")
+public class MemoryLeakEvent extends Event {
+    @Label("对象类型")
+    public String objectType;
+    
+    @Label("分配大小")
+    public long allocationSize;
+    
+    @Label("堆使用率")
+    public double heapUsagePercent;
+}
+
+public class MemoryLeakDetector {
+    private static final List<byte[]> leakyList = new ArrayList<>();
+    
+    public static void simulateMemoryLeak() {
+        MemoryLeakEvent event = new MemoryLeakEvent();
+        event.begin();
+        
+        try {
+            // 模拟内存泄露
+            for (int i = 0; i < 100; i++) {
+                byte[] data = new byte[1024 * 1024]; // 1MB
+                leakyList.add(data); // 持续添加，不释放
+            }
+            
+            // 记录事件信息
+            event.objectType = "byte[]";
+            event.allocationSize = leakyList.size() * 1024 * 1024;
+            
+            MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
+            MemoryUsage heapUsage = memoryBean.getHeapMemoryUsage();
+            event.heapUsagePercent = (double) heapUsage.getUsed() / heapUsage.getMax() * 100;
+            
+        } finally {
+            event.commit();
+        }
+    }
+}
+```
+
+#### 生产环境最佳实践
+
+**1. JFR 配置策略**
+```bash
+# 低开销配置（生产环境推荐）
+java -XX:+FlightRecorder \
+     -XX:StartFlightRecording=duration=30m,filename=prod-monitoring.jfr,settings=default \
+     -XX:FlightRecorderOptions=disk=true,maxchunksize=10M \
+     MyProductionApp
+
+# 详细分析配置（问题诊断时使用）
+java -XX:+FlightRecorder \
+     -XX:StartFlightRecording=duration=5m,filename=detailed-analysis.jfr,settings=profile \
+     MyProductionApp
+```
+
+**2. 监控脚本示例**
+```bash
+#!/bin/bash
+# jfr-monitoring.sh
+
+APP_PID=$(pgrep -f "MyProductionApp")
+RECORDING_DIR="/var/log/jfr"
+DATE_SUFFIX=$(date +"%Y%m%d_%H%M%S")
+
+if [ -z "$APP_PID" ]; then
+    echo "找不到应用进程"
+    exit 1
+fi
+
+mkdir -p $RECORDING_DIR
+
+# 启动 30 分钟的记录
+jcmd $APP_PID JFR.start name=monitoring_$DATE_SUFFIX \
+    duration=30m filename=$RECORDING_DIR/monitoring_$DATE_SUFFIX.jfr \
+    settings=default
+
+echo "JFR 记录已启动，记录文件: $RECORDING_DIR/monitoring_$DATE_SUFFIX.jfr"
+
+# 等待记录完成
+sleep 1800  # 30 分钟
+
+# 生成简单的分析报告
+jfr summary $RECORDING_DIR/monitoring_$DATE_SUFFIX.jfr > $RECORDING_DIR/summary_$DATE_SUFFIX.txt
+
+echo "监控完成，报告文件: $RECORDING_DIR/summary_$DATE_SUFFIX.txt"
+```
+
+**3. 自动化监控和警告**
+```java
+public class JfrAlertingSystem {
+    public static void main(String[] args) throws Exception {
+        // 启动监控记录
+        Recording alertRecording = new Recording();
+        alertRecording.enable("jdk.GarbageCollection");
+        alertRecording.enable("jdk.CPULoad").withPeriod(Duration.ofSeconds(1));
+        alertRecording.enable("jdk.JavaMonitorEnter");
+        
+        // 设置持续记录
+        alertRecording.setMaxAge(Duration.ofHours(1)); // 保持 1 小时的数据
+        alertRecording.start();
+        
+        // 定期检查和警告
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                checkPerformanceMetrics(alertRecording);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }, 0, 30, TimeUnit.SECONDS);
+        
+        // 保持运行
+        Thread.currentThread().join();
+    }
+    
+    private static void checkPerformanceMetrics(Recording recording) {
+        // 这里可以实现实时数据分析和警告逻辑
+        // 例如：GC 频繁、CPU 过高、锁竞争等
+        System.out.println("执行性能检查 - " + new Date());
+        
+        // 实际实现中，可以通过 JFR API 读取实时数据
+        // 并根据阈值发送警告
+    }
+}
+```
+
+#### 与其他工具的对比
+
+| 特性 | JFR | JProfiler | YourKit | VisualVM |
+|------|-----|-----------|---------|----------|
+| 开销 | 极低(1-3%) | 中等(5-15%) | 中等(5-15%) | 低(2-5%) |
+| 生产环境 | ✓ | ✗ | ✗ | ✓ |
+| 详细程度 | 高 | 非常高 | 非常高 | 中等 |
+| 易用性 | 中等 | 高 | 高 | 高 |
+| 成本 | 免费 | 商业 | 商业 | 免费 |
+
+Java Flight Recorder 是现代 Java 应用性能监控和问题诊断的强大工具，特别适合生产环境使用。

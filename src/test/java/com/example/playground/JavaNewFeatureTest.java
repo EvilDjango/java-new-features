@@ -1603,4 +1603,213 @@ public class JavaNewFeatureTest {
         System.out.println("");
     }
 
+    @Test
+    void detailedNullPointerExceptionTest() {
+        System.out.println("--- Java 14: 更详尽的 NullPointerException ---");
+        
+        System.out.println("1. 方法调用链中的 NPE:");
+        testChainedMethodCall();
+        
+        System.out.println("\n2. 数组访问中的 NPE:");
+        testArrayAccess();
+        
+        System.out.println("\n3. 字段访问中的 NPE:");
+        testFieldAccess();
+        
+        System.out.println("");
+    }
+    
+    private void testChainedMethodCall() {
+        try {
+            TestUser user = new TestUser();
+            // 这会产生详细的 NPE 信息
+            String country = user.getProfile().getAddress().getCountry().toUpperCase();
+            System.out.println("国家: " + country);
+        } catch (NullPointerException e) {
+            System.out.println("捕获到 NPE: " + e.getMessage());
+        }
+    }
+    
+    private void testArrayAccess() {
+        try {
+            String[][] matrix = new String[3][];
+            // 这会产生详细的 NPE 信息
+            int length = matrix[1].length;
+            System.out.println("长度: " + length);
+        } catch (NullPointerException e) {
+            System.out.println("数组访问 NPE: " + e.getMessage());
+        }
+    }
+    
+    private void testFieldAccess() {
+        try {
+            TestContainer container = null;
+            // 这会产生详细的 NPE 信息
+            System.out.println("值: " + container.value);
+        } catch (NullPointerException e) {
+            System.out.println("字段访问 NPE: " + e.getMessage());
+        }
+    }
+
+    @Test
+    void jfrBasicUsageTest() throws Exception {
+        System.out.println("--- Java 11: Java Flight Recorder (JFR) ---");
+        
+        System.out.println("1. 程序化控制 JFR:");
+        demonstrateJfrProgrammatic();
+        
+        System.out.println("\n2. 自定义事件演示:");
+        demonstrateCustomJfrEvent();
+        
+        System.out.println("");
+    }
+    
+    private void demonstrateJfrProgrammatic() {
+        try {
+            // 注意：实际环境中需要添加 jdk.jfr 模块
+            System.out.println("JFR 功能演示 - 由于模块限制，这里仅展示概念");
+            System.out.println("实际使用需要:");
+            System.out.println("  1. 添加 --add-modules jdk.jfr JVM 参数");
+            System.out.println("  2. 或在 module-info.java 中添加 requires jdk.jfr;");
+            System.out.println("  3. 使用 Recording API 进行编程控制");
+            
+            // 模拟 JFR 记录过程
+            simulateBusinessOperation();
+            
+        } catch (Exception e) {
+            System.out.println("JFR 演示过程中出现异常: " + e.getMessage());
+        }
+    }
+    
+    private void demonstrateCustomJfrEvent() {
+        System.out.println("自定义 JFR 事件概念演示:");
+        System.out.println("  - 定义自定义事件类继承 Event");
+        System.out.println("  - 使用 @Name, @Label, @Description 注解");
+        System.out.println("  - 在业务逻辑中调用 begin() 和 commit()");
+        
+        // 模拟业务操作并记录
+        long startTime = System.nanoTime();
+        performSampleBusinessLogic();
+        long duration = System.nanoTime() - startTime;
+        
+        System.out.println("  模拟事件记录: 业务操作耗时 " + (duration / 1_000_000) + " ms");
+    }
+    
+    private void simulateBusinessOperation() throws InterruptedException {
+        System.out.println("  执行模拟业务操作...");
+        
+        // CPU 密集操作
+        for (int i = 0; i < 10000; i++) {
+            Math.sqrt(Math.random() * 1000);
+        }
+        
+        // 内存分配
+        List<String> tempData = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            tempData.add("测试数据-" + i);
+        }
+        
+        // I/O 模拟
+        Thread.sleep(50);
+        
+        System.out.println("  业务操作完成");
+    }
+    
+    private void performSampleBusinessLogic() {
+        // 模拟一些计算密集的操作
+        double result = 0;
+        for (int i = 0; i < 100000; i++) {
+            result += Math.random();
+        }
+        
+        // 模拟数据处理
+        Map<String, Integer> dataMap = new HashMap<>();
+        for (int i = 0; i < 1000; i++) {
+            dataMap.put("key" + i, i * 2);
+        }
+    }
+
+    @Test
+    void singleFileSourceLaunchDemoTest() {
+        System.out.println("--- Java 11: 单文件源码程序启动 ---");
+        
+        System.out.println("单文件启动功能演示:");
+        System.out.println("1. 传统方式:");
+        System.out.println("   javac HelloWorld.java");
+        System.out.println("   java HelloWorld");
+        System.out.println("");
+        
+        System.out.println("2. 单文件启动方式 (Java 11+):");
+        System.out.println("   java HelloWorld.java");
+        System.out.println("");
+        
+        System.out.println("3. 带参数的单文件启动:");
+        System.out.println("   java HelloWorld.java arg1 arg2");
+        System.out.println("");
+        
+        System.out.println("4. 使用类路径的单文件启动:");
+        System.out.println("   java --class-path /path/to/libs MyScript.java");
+        System.out.println("");
+        
+        System.out.println("5. Shebang 支持 (Unix/Linux):");
+        System.out.println("   在 .java 文件第一行添加: #!/usr/bin/java --source 11");
+        System.out.println("   chmod +x script.java");
+        System.out.println("   ./script.java");
+        System.out.println("");
+        
+        // 演示一个简单的工具类功能
+        demonstrateUtilityFunction();
+    }
+    
+    private void demonstrateUtilityFunction() {
+        System.out.println("模拟单文件工具类功能:");
+        
+        // 模拟文件处理工具
+        String[] sampleData = {"apple", "banana", "cherry", "date"};
+        System.out.println("  原始数据: " + Arrays.toString(sampleData));
+        
+        // 数据处理
+        String processed = Arrays.stream(sampleData)
+            .map(String::toUpperCase)
+            .collect(Collectors.joining(", "));
+        System.out.println("  处理后: " + processed);
+        
+        // 统计信息
+        int totalLength = Arrays.stream(sampleData)
+            .mapToInt(String::length)
+            .sum();
+        System.out.println("  总字符数: " + totalLength);
+        
+        System.out.println("  这种功能非常适合单文件启动模式");
+    }
+
+    // 辅助测试类
+    static class TestUser {
+        private TestProfile profile;
+        
+        public TestProfile getProfile() {
+            return profile; // 返回 null，会导致 NPE
+        }
+    }
+    
+    static class TestProfile {
+        private TestAddress address;
+        
+        public TestAddress getAddress() {
+            return address;
+        }
+    }
+    
+    static class TestAddress {
+        private String country;
+        
+        public String getCountry() {
+            return country;
+        }
+    }
+    
+    static class TestContainer {
+        String value;
+    }
+
 }
