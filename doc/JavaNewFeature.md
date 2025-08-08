@@ -2,11 +2,44 @@
 
 本文档是一份详尽的实操指南，旨在深入、透彻地讲解从 Java 8 到 Java 24 的核心新特性。它不仅包含特性的基本用法，更沉淀了我们关于实现原理、最佳实践、常见陷阱和性能影响的深入探讨，可作为您在日常开发和架构设计中的参考手册。
 
+> **📖 文档使用指南**
+> - 总计约 5700 行，涵盖 26 个核心特性
+> - 每个特性都包含完整的代码示例和最佳实践
+> - 建议使用 Ctrl+F (或 Cmd+F) 快速查找特定内容
+> - 点击目录链接可直接跳转到对应章节
+
 ---
 
-## 目录
+## 🚀 快速导航
 
-*   [**一、 语言核心特性**](#一-语言核心特性)
+### 按 Java 版本快速查找
+| Java 版本 | 主要特性 | 直接链接 |
+|-----------|---------|---------|
+| Java 9 | 模块化、集合工厂、JShell | [模块化系统](#18-模块化系统-project-jigsaw-java-9) \| [集合工厂方法](#15-集合工厂方法-collection-factory-methods-java-9) \| [JShell](#23-jshell-java-repl-工具-java-9) |
+| Java 10 | `var` 类型推断 | [局部变量类型推断](#1-局部变量类型推断-var-java-10) |
+| Java 11 | HTTP 客户端、单文件启动、JFR | [HTTP 客户端](#14-http-客户端-standard-http-client-java-11) \| [单文件启动](#24-单文件源码程序启动-java-11) \| [JFR](#26-飞行记录器-jfr-java-11) |
+| Java 14 | Switch 表达式、详尽 NPE | [Switch 表达式](#2-switch-表达式-java-14) \| [详尽 NPE](#25-更详尽的-nullpointerexception-java-14) |
+| Java 15 | 文本块、新 GC | [文本块](#3-文本块-text-blocks-java-15) \| [新垃圾收集器](#19-新的垃圾收集器-zgc--shenandoah-java-15) |
+| Java 16 | 记录类、模式匹配 | [记录类](#4-记录类-record-java-16) \| [模式匹配](#6-模式匹配-pattern-matching-java-16-23) |
+| Java 17 | 密封类 | [密封类](#5-密封类和接口-sealed-classes-java-17) |
+| Java 21 | 虚拟线程、有序集合 | [虚拟线程](#10-虚拟线程-virtual-threads-java-21-正式) \| [有序集合](#13-有序集合-sequenced-collections-java-21) |
+| Java 22 | FFI & Memory API、结构化并发 | [外部函数与内存 API](#20-外部函数与内存-api-foreign-function--memory-api-java-22-正式) \| [结构化并发](#11-结构化并发-structured-concurrency-java-22-预览) |
+| Java 24 | Vector API、Class-File API、Stream Gatherers | [向量 API](#21-向量-api-vector-api-java-24-第九轮孵化) \| [类文件 API](#22-类文件-api-class-file-api-java-24-正式) \| [Stream 聚合器](#17-stream-聚合器-stream-gatherers-java-24-正式) |
+
+### 按功能分类快速查找
+| 分类 | 相关特性 | 直接链接 |
+|------|---------|---------|
+| 🎯 语法增强 | var、Switch表达式、文本块、记录类、密封类 | [语言核心特性](#一-语言核心与语法) |
+| ⚡ 并发性能 | 虚拟线程、结构化并发、作用域值、新GC | [并发与性能](#二-并发与性能) |
+| 📚 API 增强 | HTTP客户端、集合增强、Stream增强 | [API 与标准库](#三-api-与库) |
+| 🏗️ 平台架构 | 模块化、FFI、Vector API、Class-File API | [平台与架构](#四-jvm-与底层) |
+| 🛠️ 开发工具 | JShell、单文件启动、详尽NPE、JFR | [开发体验与工具](#五-开发体验与工具) |
+
+---
+
+## 📋 详细目录
+
+*   [**一、 语言核心特性**](#一-语言核心与语法)
     *   [1. 局部变量类型推断 (`var`) (Java 10)](#1-局部变量类型推断-var-java-10)
     *   [2. Switch 表达式 (Java 14)](#2-switch-表达式-java-14)
     *   [3. 文本块 (Text Blocks) (Java 15)](#3-文本块-text-blocks-java-15)
@@ -21,17 +54,18 @@
     *   [11. 结构化并发 (Structured Concurrency) (Java 22, 预览)](#11-结构化并发-structured-concurrency-java-22-预览)
     *   [12. 作用域值 (Scoped Values) (Java 22, 预览)](#12-作用域值-scoped-values-java-22-预览)
     *   [19. 新的垃圾收集器 (ZGC & Shenandoah) (Java 15)](#19-新的垃圾收集器-zgc--shenandoah-java-15)
-*   [**三、 API 与标准库**](#三-api-与标准库)
+*   [**三、 API 与标准库**](#三-api-与库)
     *   [13. 有序集合 (Sequenced Collections) (Java 21)](#13-有序集合-sequenced-collections-java-21)
     *   [14. HTTP 客户端 (Standard HTTP Client) (Java 11)](#14-http-客户端-standard-http-client-java-11)
     *   [15. 集合工厂方法 (Collection Factory Methods) (Java 9)](#15-集合工厂方法-collection-factory-methods-java-9)
     *   [16. Stream, Optional, String 等 API 增强 (Java 9+)](#16-stream-optional-string-等-api-增强-java-9)
     *   [17. Stream 聚合器 (Stream Gatherers) (Java 24, 正式)](#17-stream-聚合器-stream-gatherers-java-24-正式)
-*   [**四、 平台与架构**](#四-平台与架构)
+*   [**四、 平台与架构**](#四-jvm-与底层)
     *   [18. 模块化系统 (Project Jigsaw) (Java 9)](#18-模块化系统-project-jigsaw-java-9)
     *   [20. 外部函数与内存 API (Foreign Function & Memory API) (Java 22, 正式)](#20-外部函数与内存-api-foreign-function--memory-api-java-22-正式)
     *   [21. 向量 API (Vector API) (Java 24, 第九轮孵化)](#21-向量-api-vector-api-java-24-第九轮孵化)
     *   [22. 类文件 API (Class-File API) (Java 24, 正式)](#22-类文件-api-class-file-api-java-24-正式)
+*   [**五、 开发体验与工具**](#五-开发体验与工具)
     *   [23. JShell: Java REPL 工具 (Java 9)](#23-jshell-java-repl-工具-java-9)
     *   [24. 单文件源码程序启动 (Java 11)](#24-单文件源码程序启动-java-11)
     *   [25. 更详尽的 NullPointerException (Java 14)](#25-更详尽的-nullpointerexception-java-14)
@@ -459,6 +493,12 @@ switch (point) {
         // 输出展示了清晰的执行顺序
     }
     ```
+
+---
+
+[**🔙 返回目录**](#📋-详细目录)
+
+---
 
 ## 二、 并发与性能
 
@@ -948,6 +988,10 @@ public void newWay(String userId) {
 ```
 
 作用域值代表了 Java 并发编程的现代化方向，特别是在虚拟线程大量使用的场景下，它提供了比 ThreadLocal 更安全、更高效的解决方案。
+
+---
+
+[**🔙 返回目录**](#📋-详细目录)
 
 ---
 
@@ -2796,6 +2840,10 @@ Stream Gatherers 为 Java 的流处理能力带来了革命性的提升，使得
 
 ---
 
+[**🔙 返回目录**](#📋-详细目录)
+
+---
+
 ## 四、 JVM 与底层
 
 ### 18. 模块化系统 (Project Jigsaw) (Java 9)
@@ -4231,6 +4279,10 @@ public class BytecodeTransformExample {
 5. **测试覆盖**：充分测试各种边界情况和错误路径
 
 Class-File API 为 Java 字节码操作提供了官方标准化的解决方案，预期将成为字节码工具的新标准。
+
+---
+
+[**🔙 返回目录**](#📋-详细目录)
 
 ---
 
@@ -5698,3 +5750,26 @@ public class JfrAlertingSystem {
 | 成本 | 免费 | 商业 | 商业 | 免费 |
 
 Java Flight Recorder 是现代 Java 应用性能监控和问题诊断的强大工具，特别适合生产环境使用。
+
+---
+
+[**🔙 返回目录**](#📋-详细目录) | [**⬆️ 回到顶部**](#java-新特性实操手册-java-8---24)
+
+---
+
+## 📚 结语
+
+这份 Java 新特性实操手册涵盖了从 Java 8 到 Java 24 的 26 个核心特性，每个特性都包含：
+
+- 📖 **详尽的理论解释**：背景、动机、核心概念
+- 💻 **完整的代码示例**：可直接运行的实际代码
+- ⚡ **最佳实践指导**：生产环境使用建议
+- 🔍 **深入分析对比**：与传统方案的优劣对比
+- 🎯 **实际应用场景**：真实业务中的使用案例
+
+希望这份手册能够成为你 Java 学习和开发路上的得力助手！
+
+> **💡 持续更新**  
+> Java 平台持续演进，我们也会不断更新这份文档，加入最新的特性和最佳实践。
+
+**Happy Coding! 🚀**
