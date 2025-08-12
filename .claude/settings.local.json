@@ -3,7 +3,18 @@
     "allow": [
       "Bash(git add:*)",
       "Bash(mkdir:*)",
-      "Bash(./gradlew:*)"
+      "Bash(./gradlew:*)",
+      "Bash(javac:*)",
+      "Bash(java:*)",
+      "Bash(find:*)",
+      "Bash(echo $SHELL)",
+      "Bash(echo $NODE_OPTIONS)",
+      "Bash(task reviewer:*)",
+      "Bash(claude task reviewer:*)",
+      "mcp__context7__resolve-library-id",
+      "Bash(python:*)",
+      "Bash(Task agent='reviewer' message='请对RateLimiter限流器系统进行全面代码审查。\n\n审查范围：\n1. /Users/django/Projects/java-new-features/src/main/java/com/example/ratelimiter/RateLimiter.java - 核心接口\n2. /Users/django/Projects/java-new-features/src/main/java/com/example/ratelimiter/TokenBucketRateLimiter.java - 令牌桶算法实现  \n3. /Users/django/Projects/java-new-features/src/main/java/com/example/ratelimiter/SlidingWindowRateLimiter.java - 滑动窗口算法实现\n4. /Users/django/Projects/java-new-features/src/main/java/com/example/ratelimiter/FixedWindowRateLimiter.java - 固定窗口算法实现\n5. /Users/django/Projects/java-new-features/src/main/java/com/example/ratelimiter/RateLimiterFactory.java - 工厂类\n6. /Users/django/Projects/java-new-features/src/main/java/com/example/ratelimiter/RateLimiterExample.java - 示例代码\n\n审查维度：\n1. 代码质量和架构设计\n2. 算法实现的正确性\n3. 性能优化机会\n4. 线程安全性\n5. 异常处理\n6. 代码可读性和维护性\n7. 最佳实践遵循情况\n8. 潜在的bug和边界条件处理\n\n请提供详细的审查意见和具体的改进建议。')",
+      "Bash(Task agent='gemini' message='请对以下Java限流器系统代码进行全面审查。\n\n代码文件位置：\n- src/main/java/com/example/ratelimiter/RateLimiter.java\n- src/main/java/com/example/ratelimiter/TokenBucketRateLimiter.java  \n- src/main/java/com/example/ratelimiter/SlidingWindowRateLimiter.java\n- src/main/java/com/example/ratelimiter/FixedWindowRateLimiter.java\n- src/main/java/com/example/ratelimiter/RateLimiterFactory.java\n- src/main/java/com/example/ratelimiter/RateLimiterExample.java\n\n请从以下维度进行审查：\n1. 代码质量和架构设计\n2. 算法实现的正确性\n3. 性能优化机会\n4. 线程安全性\n5. 异常处理\n6. 代码可读性和维护性\n7. 最佳实践遵循情况  \n8. 潜在的bug和边界条件处理\n\n请提供详细的审查报告，包括发现的问题、改进建议和具体的代码示例。')"
     ],
     "deny": []
   }
