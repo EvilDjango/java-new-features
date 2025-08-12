@@ -25,7 +25,11 @@
       "Bash(cat:*)",
       "Bash(npm uninstall:*)",
       "Bash(hash -r)",
-      "Bash(brew uninstall:*)"
+      "Bash(brew uninstall:*)",
+      "Bash(gemini 现在几点了？)",
+      "Bash(awk:*)",
+      "Bash(grep:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }
